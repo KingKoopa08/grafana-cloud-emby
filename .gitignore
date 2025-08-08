@@ -1,0 +1,70 @@
+# Configuration files with secrets
+config/config.env
+*.env
+!*.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+.venv
+*.egg-info/
+dist/
+build/
+
+# Logs
+*.log
+logs/
+*.pid
+
+# System files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+*.sublime-*
+
+# Backup files
+*.backup
+*.bak
+*.old
+
+# Temporary files
+tmp/
+temp/
+.tmp/
+
+# Test coverage
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+*.cover
+
+# Grafana Agent WAL directory (if testing locally)
+wal/
+positions.yaml
+
+# Local test data
+test-data/
+*.test
+
+# SSL certificates (if any)
+*.pem
+*.key
+*.crt
+*.cer
+
+# Archive files
+*.tar.gz
+*.zip
+*.tar
+*.gz

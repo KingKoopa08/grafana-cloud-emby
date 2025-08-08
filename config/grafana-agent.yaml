@@ -1,0 +1,166 @@
+server:
+  log_level: info
+  http_listen_port: 12345
+
+metrics:
+  global:
+    scrape_interval: 30s
+    external_labels:
+      cluster: 'emby-server'
+      instance: 'emby-primary'
+  
+  configs:
+    - name: integrations
+      remote_write:
+        - url: https://prometheus-prod-36-prod-us-west-0.grafana.net/api/prom/push
+          basic_auth:
+            username: '2607589'
+            password: ${GRAFANA_CLOUD_API_KEY}
+      
+      scrape_configs:
+        # Emby Exporter metrics
+        - job_name: 'emby-exporter'
+          static_configs:
+            - targets: ['localhost:9119']
+              labels:
+                service: 'emby'
+                environment: 'production'
+        
+        # Node Exporter metrics (system metrics)
+        - job_name: 'node'
+          static_configs:
+            - targets: ['localhost:9100']
+              labels:
+                host: 'emby-server'
+        
+        # Grafana Agent's own metrics
+        - job_name: 'grafana-agent'
+          static_configs:
+            - targets: ['localhost:12345']
+
+integrations:
+  agent:
+    enabled: true
+  
+  node_exporter:
+    enabled: true
+    include_exporter_metrics: true
+    disable_collectors:
+      - "mdadm"
+    
+    filesystem_mount_points_exclude: |
+      ^/(dev|proc|sys|run|var/lib/docker|var/lib/kubelet|snap)($|/)
+    
+    filesystem_fs_types_exclude: |
+      ^(autofs|binfmt_misc|bpf|cgroup2?|configfs|debugfs|devpts|devtmpfs|tmpfs|fusectl|hugetlbfs|iso9660|mqueue|nsfs|overlay|proc|procfs|pstore|rpc_pipefs|securityfs|selinuxfs|squashfs|sysfs|tracefs)$
+  
+  prometheus_remote_write:
+    - url: https://prometheus-prod-36-prod-us-west-0.grafana.net/api/prom/push
+      basic_auth:
+        username: '2607589'
+        password: ${GRAFANA_CLOUD_API_KEY}
+
+logs:
+  configs:
+    - name: default
+      clients:
+        - url: https://logs-prod-012.grafana.net/loki/api/v1/push
+          basic_auth:
+            username: '2607589'
+            password: ${GRAFANA_CLOUD_API_KEY}
+          external_labels:
+            cluster: 'emby-server'
+            job: 'varlogs'
+      
+      positions:
+        filename: /tmp/positions.yaml
+      
+      scrape_configs:
+        # Emby Server logs
+        - job_name: emby
+          static_configs:
+            - targets:
+                - localhost
+              labels:
+                job: emby
+                __path__: /var/lib/emby/logs/*.txt
+          
+          pipeline_stages:
+            - regex:
+                expression: '^(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d+) \[(?P<level>\w+)\] (?P<logger>[^:]+): (?P<message>.*)'
+            
+            - labels:
+                level:
+                logger:
+            
+            - timestamp:
+                source: timestamp
+                format: '2006-01-02 15:04:05.000'
+        
+        # System logs
+        - job_name: system
+          journal:
+            labels:
+              job: systemd-journal
+            path: /var/log/journal
+          
+          relabel_configs:
+            - source_labels: ['__journal__systemd_unit']
+              target_label: 'unit'
+            - source_labels: ['__journal__hostname']
+              target_label: 'hostname'
+            - source_labels: ['__journal_priority_keyword']
+              target_label: 'level'
+        
+        # Nginx logs (if present)
+        - job_name: nginx
+          static_configs:
+            - targets:
+                - localhost
+              labels:
+                job: nginx
+                __path__: /var/log/nginx/*.log
+          
+          pipeline_stages:
+            - regex:
+                expression: '^(?P<remote_addr>[\w\.]+) - (?P<remote_user>[^ ]*) \[(?P<time_local>[^\]]*)\] "(?P<method>\w+) (?P<path>[^ ]*) (?P<protocol>[^ ]*)" (?P<status>\d+) (?P<body_bytes_sent>\d+) "(?P<http_referer>[^"]*)" "(?P<http_user_agent>[^"]*)"'
+            
+            - labels:
+                method:
+                status:
+            
+            - metrics:
+                http_nginx_response_bytes_total:
+                  type: Counter
+                  description: "Total amount of bytes sent in responses"
+                  source: body_bytes_sent
+                  config:
+                    action: add
+                
+                http_nginx_requests_total:
+                  type: Counter
+                  description: "Total number of requests"
+                  config:
+                    action: inc
+                    match_all: true
+
+traces:
+  configs:
+    - name: default
+      remote_write:
+        - endpoint: tempo-prod-10-prod-us-west-0.grafana.net:443
+          basic_auth:
+            username: '2607589'
+            password: ${GRAFANA_CLOUD_API_KEY}
+      
+      receivers:
+        otlp:
+          protocols:
+            grpc:
+              endpoint: 0.0.0.0:4317
+            http:
+              endpoint: 0.0.0.0:4318
+      
+      batch:
+        timeout: 5s
+        send_batch_size: 100
