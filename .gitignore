@@ -1,6 +1,7 @@
 # Configuration files with secrets
 config/config.env
 *.env
+.env.local
 !*.env.example
 
 # Python
