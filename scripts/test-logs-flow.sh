@@ -31,7 +31,12 @@ fi
 
 # The logs API key - should be set in environment
 # If not provided, use the main API key (assuming it has logs:write permission)
-LOGS_API_KEY="${GRAFANA_CLOUD_LOGS_API_KEY:-${GRAFANA_CLOUD_API_KEY}}"
+LOGS_API_KEY="${GRAFANA_CLOUD_LOGS_API_KEY:-${GRAFANA_CLOUD_API_KEY:-}}"
+
+if [ -z "$LOGS_API_KEY" ]; then
+    echo -e "${YELLOW}⚠${NC} No logs API key found, using metrics key"
+    LOGS_API_KEY="${GRAFANA_CLOUD_API_KEY}"
+fi
 
 echo ""
 echo -e "${BLUE}1. CHECKING AGENT STATUS${NC}"
