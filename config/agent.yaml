@@ -1,0 +1,123 @@
+# Grafana Agent configuration for Emby monitoring
+# This configuration scrapes both system and Emby metrics
+
+server:
+  log_level: info
+  log_format: logfmt
+  http_listen_port: 12345
+
+metrics:
+  global:
+    scrape_interval: 60s
+    scrape_timeout: 10s
+    external_labels:
+      cluster: 'emby-monitoring'
+      job: 'integrations/agent'
+    remote_write:
+      - url: ${GRAFANA_CLOUD_PROMETHEUS_URL}
+        basic_auth:
+          username: ${GRAFANA_CLOUD_USER}
+          password: ${GRAFANA_CLOUD_API_KEY}
+        queue_config:
+          capacity: 10000
+          max_shards: 10
+          max_samples_per_send: 2000
+          batch_send_deadline: 5s
+          max_retries: 10
+          min_backoff: 30ms
+          max_backoff: 5s
+
+  configs:
+    - name: default
+      scrape_configs:
+        # Emby Live TV Ultimate Exporter
+        - job_name: 'emby_livetv'
+          static_configs:
+            - targets: ['localhost:9119']
+              labels:
+                instance: 'emby-server'
+                service: 'emby'
+                component: 'livetv'
+          scrape_interval: 30s
+          scrape_timeout: 10s
+          metrics_path: /metrics
+          
+        # Alternative Emby exporter ports
+        - job_name: 'emby'
+          static_configs:
+            - targets: ['localhost:9101']
+              labels:
+                instance: 'emby-server' 
+                service: 'emby'
+                component: 'general'
+          scrape_interval: 60s
+          metrics_path: /metrics
+          honor_timestamps: true
+
+        # Node exporter for system metrics  
+        - job_name: 'node'
+          static_configs:
+            - targets: ['localhost:9100']
+              labels:
+                instance: 'emby-server'
+          metric_relabel_configs:
+            - source_labels: [__name__]
+              regex: 'node_(cpu|memory|disk|network|filesystem).*'
+              action: keep
+
+integrations:
+  # Enable agent self-monitoring
+  agent:
+    enabled: true
+    metric_relabel_configs:
+      - source_labels: [__name__]
+        regex: 'agent_build_info'
+        action: keep
+        
+  # Node exporter integration
+  node_exporter:
+    enabled: true
+    include_exporter_metrics: true
+    autoscrape:
+      enable: true
+      metrics_instance: 'default'
+      scrape_interval: 60s
+    # Collectors to enable
+    disable_collectors:
+      - "mdadm"
+      - "textfile"
+      - "wifi"
+      - "xfs"
+      - "zfs"
+    
+  # Process exporter integration (optional)
+  process_exporter:
+    enabled: false
+    
+logs:
+  configs:
+    - name: default
+      clients:
+        - url: ${GRAFANA_CLOUD_LOKI_URL}
+          basic_auth:
+            username: ${GRAFANA_CLOUD_USER}
+            password: ${GRAFANA_CLOUD_API_KEY}
+      positions:
+        filename: /tmp/positions.yaml
+      scrape_configs:
+        # Scrape Emby exporter logs
+        - job_name: emby_exporter
+          static_configs:
+            - targets:
+                - localhost
+              labels:
+                job: emby_exporter
+                __path__: /var/log/emby-exporter/*.log
+        # Scrape system logs
+        - job_name: system
+          static_configs:
+            - targets:
+                - localhost
+              labels:
+                job: syslog
+                __path__: /var/log/syslog
