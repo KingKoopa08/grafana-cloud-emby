@@ -1,0 +1,256 @@
+# Grafana Agent configuration for NFL Live Score EPG Updater monitoring
+# This configuration includes metrics scraping and log collection
+
+server:
+  log_level: info
+  log_format: logfmt
+  http_listen_port: 12345
+
+metrics:
+  global:
+    scrape_interval: 60s
+    scrape_timeout: 10s
+    external_labels:
+      environment: 'prod'
+      service: 'nfl-updater'
+    remote_write:
+      - url: ${GRAFANA_CLOUD_PROMETHEUS_URL}
+        basic_auth:
+          username: ${GRAFANA_CLOUD_USER}
+          password: ${GRAFANA_CLOUD_API_KEY}
+
+  configs:
+    - name: default
+      scrape_configs:
+        # Existing Emby Live TV metrics
+        - job_name: 'emby'
+          static_configs:
+            - targets: ['localhost:9119']
+              labels:
+                instance: 'emby-server'
+                exporter: 'ultimate'
+          scrape_interval: 30s
+          metrics_path: /metrics
+          
+        # Node exporter for system metrics
+        - job_name: 'node'
+          static_configs:
+            - targets: ['localhost:9100']
+              labels:
+                instance: 'nfl-server'
+          scrape_interval: 60s
+
+integrations:
+  agent:
+    enabled: true
+
+logs:
+  configs:
+    - name: default
+      clients:
+        - url: ${GRAFANA_CLOUD_LOKI_URL}
+          basic_auth:
+            username: ${GRAFANA_CLOUD_USER}
+            password: ${GRAFANA_CLOUD_API_KEY}
+          external_labels:
+            environment: 'prod'
+            hostname: 'ns1017440'
+            
+      positions:
+        filename: /var/lib/grafana-agent/positions.yaml
+        
+      scrape_configs:
+        # NFL Updater Application Logs
+        - job_name: nfl-updater
+          static_configs:
+            - targets:
+                - localhost
+              labels:
+                job: nfl-updater
+                service: nfl-updater
+                log_type: application
+                __path__: /home/emby/py/nfl-updater/nfl_updater.log*
+                
+          pipeline_stages:
+            # Parse Python log format
+            - regex:
+                expression: '^(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3}) - (?P<logger>\S+) - (?P<level>\w+) - (?P<message>.*)'
+            
+            # Set timestamp
+            - timestamp:
+                source: timestamp
+                format: '2006-01-02 15:04:05,000'
+                location: UTC
+            
+            # Set severity label
+            - labels:
+                level:
+                logger:
+            
+            # Extract game update information
+            - regex:
+                expression: 'Updated: (?P<away_team>[\w\s]+) \((?P<away_score>\d+)\) at (?P<home_team>[\w\s]+) \((?P<home_score>\d+)\)'
+            - labels:
+                away_team:
+                home_team:
+            - metrics:
+                game_score_update:
+                  type: Counter
+                  description: "Game score updates"
+                  prefix: nfl_updater_
+                  max_idle_duration: 24h
+                  config:
+                    action: inc
+                away_score_gauge:
+                  type: Gauge
+                  description: "Away team score"
+                  prefix: nfl_updater_
+                  max_idle_duration: 24h
+                  config:
+                    value: away_score
+                    action: set
+                home_score_gauge:
+                  type: Gauge
+                  description: "Home team score"
+                  prefix: nfl_updater_
+                  max_idle_duration: 24h
+                  config:
+                    value: home_score
+                    action: set
+            
+            # Extract game state
+            - regex:
+                expression: 'Game.*:\s+\d+-\d+\s+\((?P<game_state>LIVE|HALFTIME|FINAL|SCHEDULED)\)'
+            - labels:
+                game_state:
+            - metrics:
+                game_state_total:
+                  type: Counter
+                  description: "Game state changes"
+                  prefix: nfl_updater_
+                  max_idle_duration: 24h
+                  config:
+                    action: inc
+            
+            # Extract API response times
+            - regex:
+                expression: 'ESPN API response time: (?P<espn_response_time>[\d.]+)s'
+            - metrics:
+                espn_api_duration_seconds:
+                  type: Histogram
+                  description: "ESPN API response time"
+                  prefix: nfl_updater_
+                  max_idle_duration: 24h
+                  config:
+                    value: espn_response_time
+                    buckets: [0.1, 0.5, 1, 2, 5, 10]
+            
+            - regex:
+                expression: 'Emby API response time: (?P<emby_response_time>[\d.]+)s'
+            - metrics:
+                emby_api_duration_seconds:
+                  type: Histogram
+                  description: "Emby API response time"
+                  prefix: nfl_updater_
+                  max_idle_duration: 24h
+                  config:
+                    value: emby_response_time
+                    buckets: [0.1, 0.5, 1, 2, 5, 10]
+            
+            # Count errors
+            - metrics:
+                error_total:
+                  type: Counter
+                  description: "Total errors"
+                  prefix: nfl_updater_
+                  max_idle_duration: 24h
+                  config:
+                    match_all: true
+                    action: inc
+                  condition:
+                    - contains:
+                        contains: "ERROR"
+            
+            # Service events
+            - regex:
+                expression: 'Service (?P<service_event>started|stopped|restart)'
+            - labels:
+                service_event:
+            - metrics:
+                service_events_total:
+                  type: Counter
+                  description: "Service events"
+                  prefix: nfl_updater_
+                  max_idle_duration: 24h
+                  config:
+                    action: inc
+            
+            # Output final log line
+            - output:
+                source: message
+        
+        # NFL Updater Systemd Journal Logs
+        - job_name: nfl-updater-journal
+          journal:
+            matches: _SYSTEMD_UNIT=nfl-updater.service
+            labels:
+              job: nfl-updater-journal
+              service: nfl-updater
+              log_type: systemd
+          relabel_configs:
+            - source_labels: ['__journal__systemd_unit']
+              target_label: 'unit'
+            - source_labels: ['__journal__hostname']
+              target_label: 'hostname'
+            - source_labels: ['__journal_priority']
+              target_label: 'priority'
+          pipeline_stages:
+            # Parse systemd priority
+            - template:
+                source: priority
+                template: |
+                  {{if eq .Value "0"}}emergency{{else if eq .Value "1"}}alert{{else if eq .Value "2"}}critical{{else if eq .Value "3"}}error{{else if eq .Value "4"}}warning{{else if eq .Value "5"}}notice{{else if eq .Value "6"}}info{{else if eq .Value "7"}}debug{{else}}unknown{{end}}
+            - labels:
+                severity:
+                  
+            # Count service restarts
+            - metrics:
+                service_restart_total:
+                  type: Counter
+                  description: "Service restart count"
+                  prefix: nfl_updater_
+                  max_idle_duration: 24h
+                  config:
+                    action: inc
+                  condition:
+                    - contains:
+                        contains: "Started NFL Live Score EPG Updater"
+                        
+            # Track service status
+            - metrics:
+                service_up:
+                  type: Gauge
+                  description: "Service status (1=up, 0=down)"
+                  prefix: nfl_updater_
+                  max_idle_duration: 24h
+                  config:
+                    value: 1
+                    action: set
+                  condition:
+                    - contains:
+                        contains: "Started NFL"
+            - metrics:
+                service_up:
+                  type: Gauge
+                  description: "Service status (1=up, 0=down)"
+                  prefix: nfl_updater_
+                  max_idle_duration: 24h
+                  config:
+                    value: 0
+                    action: set
+                  condition:
+                    - contains:
+                        contains: "Stopped NFL"
+            
+            - output:
+                source: message

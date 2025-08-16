@@ -1,0 +1,153 @@
+# Alert Rules for NFL Live Score EPG Updater
+# Import these rules into Grafana Cloud Alerting
+
+groups:
+  - name: nfl_updater_alerts
+    interval: 60s
+    rules:
+      # Critical: Service Down
+      - alert: NFLUpdaterServiceDown
+        expr: nfl_updater_service_up == 0
+        for: 5m
+        labels:
+          severity: critical
+          service: nfl-updater
+          team: operations
+        annotations:
+          summary: "NFL Updater Service is DOWN"
+          description: "The NFL Live Score EPG Updater service has been down for more than 5 minutes."
+          runbook_url: "https://wiki.example.com/runbooks/nfl-updater-down"
+          
+      # Warning: High Error Rate
+      - alert: NFLUpdaterHighErrorRate
+        expr: sum(rate(nfl_updater_error_total[1h])) > 10
+        for: 5m
+        labels:
+          severity: warning
+          service: nfl-updater
+          team: operations
+        annotations:
+          summary: "High error rate detected"
+          description: "NFL Updater is experiencing more than 10 errors per hour (current: {{ $value | humanize }})"
+          
+      # Warning: No Updates During Game Window
+      - alert: NFLUpdaterNoUpdates
+        expr: |
+          (hour() >= 18 or hour() <= 4) and 
+          (day_of_week() == 0 or day_of_week() == 6 or day_of_week() == 7) and
+          sum(increase(nfl_updater_game_score_update[10m])) == 0
+        for: 10m
+        labels:
+          severity: warning
+          service: nfl-updater
+          team: operations
+        annotations:
+          summary: "No score updates during game window"
+          description: "No NFL score updates detected during expected game hours (weekend 1-11 PM ET)"
+          
+      # Info: New Live Game Started
+      - alert: NFLNewLiveGame
+        expr: increase(nfl_updater_game_state_total{game_state="LIVE"}[5m]) > 0
+        labels:
+          severity: info
+          service: nfl-updater
+          team: operations
+        annotations:
+          summary: "New NFL game went LIVE"
+          description: "A new NFL game has started and is now LIVE"
+          
+      # Warning: ESPN API Slow
+      - alert: NFLESPNAPIResponseSlow
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(nfl_updater_espn_api_duration_seconds_bucket[5m])) by (le)
+          ) > 5
+        for: 10m
+        labels:
+          severity: warning
+          service: nfl-updater
+          api: espn
+          team: operations
+        annotations:
+          summary: "ESPN API responding slowly"
+          description: "ESPN API 95th percentile response time is above 5 seconds (current: {{ $value | humanizeSeconds }})"
+          
+      # Warning: Emby API Slow
+      - alert: NFLEmbyAPIResponseSlow
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(nfl_updater_emby_api_duration_seconds_bucket[5m])) by (le)
+          ) > 5
+        for: 10m
+        labels:
+          severity: warning
+          service: nfl-updater
+          api: emby
+          team: operations
+        annotations:
+          summary: "Emby API responding slowly"
+          description: "Emby API 95th percentile response time is above 5 seconds (current: {{ $value | humanizeSeconds }})"
+          
+      # Critical: Service Restart Loop
+      - alert: NFLUpdaterRestartLoop
+        expr: increase(nfl_updater_service_restart_total[10m]) > 3
+        labels:
+          severity: critical
+          service: nfl-updater
+          team: operations
+        annotations:
+          summary: "Service is in restart loop"
+          description: "NFL Updater has restarted more than 3 times in 10 minutes ({{ $value }} restarts)"
+          
+      # Warning: Log Ingestion Failed
+      - alert: NFLLogIngestionFailed
+        expr: |
+          up{job="nfl-updater"} == 0 or
+          absent(up{job="nfl-updater"})
+        for: 10m
+        labels:
+          severity: warning
+          service: nfl-updater
+          component: logging
+          team: operations
+        annotations:
+          summary: "Log ingestion failing"
+          description: "NFL Updater logs are not being ingested to Loki"
+
+# Recording Rules for Performance
+recording_rules:
+  - name: nfl_updater_aggregations
+    interval: 30s
+    rules:
+      # Updates per minute
+      - record: nfl:updates_per_minute
+        expr: sum(rate(nfl_updater_game_score_update[1m]))
+        
+      # Error rate percentage
+      - record: nfl:error_rate_percentage
+        expr: |
+          100 * (
+            sum(rate(nfl_updater_error_total[5m])) / 
+            sum(rate(nfl_updater_game_score_update[5m]))
+          )
+          
+      # Average API response times
+      - record: nfl:espn_api_latency_avg
+        expr: |
+          histogram_quantile(0.5,
+            sum(rate(nfl_updater_espn_api_duration_seconds_bucket[5m])) by (le)
+          )
+          
+      - record: nfl:emby_api_latency_avg
+        expr: |
+          histogram_quantile(0.5,
+            sum(rate(nfl_updater_emby_api_duration_seconds_bucket[5m])) by (le)
+          )
+          
+      # Service availability
+      - record: nfl:service_availability_5m
+        expr: avg_over_time(nfl_updater_service_up[5m])
+        
+      # Active games count
+      - record: nfl:active_games_count
+        expr: count(count by (game_state) (nfl_updater_game_state_total{game_state="LIVE"}))
