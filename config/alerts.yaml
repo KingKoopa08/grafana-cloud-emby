@@ -1,0 +1,228 @@
+# Grafana Alert Rules for Emby Live TV Monitoring
+# Import these rules in Grafana Cloud Alert Manager
+
+apiVersion: 1
+
+groups:
+  - name: emby_livetv_critical
+    interval: 30s
+    rules:
+      - alert: EmbyServerDown
+        expr: emby_up == 0
+        for: 2m
+        labels:
+          severity: critical
+          component: server
+        annotations:
+          summary: "Emby server is down"
+          description: "Emby server {{ $labels.instance }} has been down for more than 2 minutes"
+          
+      - alert: LiveTVDisabled
+        expr: emby_livetv_enabled == 0 and emby_up == 1
+        for: 5m
+        labels:
+          severity: warning
+          component: livetv
+        annotations:
+          summary: "Live TV is disabled"
+          description: "Live TV feature is disabled on Emby server"
+          
+      - alert: AllTunersInUse
+        expr: emby_livetv_tuner_utilization_percent >= 100
+        for: 5m
+        labels:
+          severity: critical
+          component: tuners
+        annotations:
+          summary: "All tuners are in use"
+          description: "100% tuner utilization - no tuners available for new streams"
+          
+      - alert: HighTunerUtilization
+        expr: emby_livetv_tuner_utilization_percent >= 80
+        for: 10m
+        labels:
+          severity: warning
+          component: tuners
+        annotations:
+          summary: "High tuner utilization"
+          description: "Tuner utilization is {{ $value }}% - limited capacity remaining"
+
+  - name: emby_livetv_performance
+    interval: 1m
+    rules:
+      - alert: HighBandwidthUsage
+        expr: emby_livetv_bandwidth_total_mbps > 500
+        for: 5m
+        labels:
+          severity: warning
+          component: bandwidth
+        annotations:
+          summary: "High Live TV bandwidth usage"
+          description: "Live TV bandwidth usage is {{ $value }} Mbps"
+          
+      - alert: ExcessiveTranscoding
+        expr: (emby_livetv_transcoding_active / emby_livetv_streams_active) > 0.7
+        for: 10m
+        labels:
+          severity: warning
+          component: transcoding
+        annotations:
+          summary: "High transcoding ratio"
+          description: "{{ $value | humanizePercentage }} of streams are being transcoded"
+          
+      - alert: StreamingErrors
+        expr: rate(emby_livetv_stream_errors_total[5m]) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+          component: streaming
+        annotations:
+          summary: "Streaming errors detected"
+          description: "Streaming error rate is {{ $value }} errors/sec"
+          
+      - alert: APIResponseSlow
+        expr: emby_api_response_time_seconds{quantile="0.95"} > 2
+        for: 5m
+        labels:
+          severity: warning
+          component: api
+        annotations:
+          summary: "Slow API response times"
+          description: "95th percentile API response time is {{ $value }}s for {{ $labels.endpoint }}"
+
+  - name: emby_livetv_capacity
+    interval: 1m
+    rules:
+      - alert: PeakStreamingLoad
+        expr: emby_livetv_streams_active > 50
+        for: 5m
+        labels:
+          severity: info
+          component: capacity
+        annotations:
+          summary: "High streaming load"
+          description: "{{ $value }} concurrent Live TV streams active"
+          
+      - alert: RecordingStorageFull
+        expr: emby_livetv_recording_storage_gb > 1000
+        for: 15m
+        labels:
+          severity: warning
+          component: storage
+        annotations:
+          summary: "Recording storage high"
+          description: "Recording storage usage is {{ $value }} GB"
+          
+      - alert: RecordingFailed
+        expr: increase(emby_livetv_recordings_failed_total[1h]) > 0
+        labels:
+          severity: critical
+          component: recording
+        annotations:
+          summary: "Recording failure detected"
+          description: "{{ $value }} recording(s) failed in the last hour"
+          
+      - alert: NoChannelsAvailable
+        expr: emby_livetv_channels_available == 0 and emby_livetv_channels_total > 0
+        for: 5m
+        labels:
+          severity: critical
+          component: channels
+        annotations:
+          summary: "No Live TV channels available"
+          description: "All {{ $labels.emby_livetv_channels_total }} channels are unavailable"
+
+  - name: emby_livetv_user_experience
+    interval: 1m
+    rules:
+      - alert: HighChannelSwitchTime
+        expr: histogram_quantile(0.95, rate(emby_livetv_channel_switch_seconds_bucket[5m])) > 5
+        for: 10m
+        labels:
+          severity: warning
+          component: performance
+        annotations:
+          summary: "Slow channel switching"
+          description: "95th percentile channel switch time is {{ $value }}s"
+          
+      - alert: PoorStreamQuality
+        expr: (emby_livetv_streams_by_quality{quality=~"480p|SD"} / emby_livetv_streams_active) > 0.5
+        for: 10m
+        labels:
+          severity: info
+          component: quality
+        annotations:
+          summary: "Many low quality streams"
+          description: "{{ $value | humanizePercentage }} of streams are low quality (480p or SD)"
+          
+      - alert: HighConcurrentStreamsPerUser
+        expr: emby_livetv_concurrent_streams > 3
+        for: 5m
+        labels:
+          severity: info
+          component: users
+        annotations:
+          summary: "User with many concurrent streams"
+          description: "User {{ $labels.user }} has {{ $value }} concurrent streams"
+          
+      - alert: BufferingIssues
+        expr: emby_livetv_buffer_health_percent < 80
+        for: 5m
+        labels:
+          severity: warning
+          component: streaming
+        annotations:
+          summary: "Stream buffering issues"
+          description: "Buffer health for {{ $labels.user }}'s stream is {{ $value }}%"
+
+  - name: emby_livetv_epg
+    interval: 5m
+    rules:
+      - alert: EPGDataMissing
+        expr: emby_livetv_epg_days < 1
+        for: 30m
+        labels:
+          severity: warning
+          component: epg
+        annotations:
+          summary: "EPG data running out"
+          description: "Only {{ $value }} days of EPG data available"
+          
+      - alert: NoProgramData
+        expr: emby_livetv_epg_programs_today == 0
+        for: 15m
+        labels:
+          severity: warning
+          component: epg
+        annotations:
+          summary: "No program data for today"
+          description: "EPG has no program information for today"
+
+# Recording Rules for Performance Optimization
+recording_rules:
+  - name: emby_livetv_aggregates
+    interval: 30s
+    rules:
+      - record: emby:livetv:streams:rate5m
+        expr: rate(emby_livetv_streams_active[5m])
+        
+      - record: emby:livetv:bandwidth:avg5m
+        expr: avg_over_time(emby_livetv_bandwidth_total_mbps[5m])
+        
+      - record: emby:livetv:transcoding:ratio
+        expr: emby_livetv_transcoding_active / emby_livetv_streams_active
+        
+      - record: emby:livetv:quality:distribution
+        expr: |
+          label_replace(
+            emby_livetv_streams_by_quality / ignoring(quality) group_left sum(emby_livetv_streams_by_quality),
+            "percentage", "$1", "quality", "(.*)"
+          )
+        
+      - record: emby:livetv:channel:popularity:rank
+        expr: |
+          topk(10, 
+            sum by (channel_name) (
+              rate(emby_livetv_user_watch_time_seconds_total[1h])
+            )
+          )
