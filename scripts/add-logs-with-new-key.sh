@@ -19,17 +19,6 @@ echo -e "${CYAN}  ADD LOGS WITH NEW API KEY${NC}"
 echo -e "${MAGENTA}═══════════════════════════════════════════════════════════════${NC}"
 echo ""
 
-# The new logs API key - should be set in environment or passed as argument
-# If not provided, use the main API key (assuming it has logs:write permission)
-LOGS_API_KEY="${GRAFANA_CLOUD_LOGS_API_KEY:-${GRAFANA_CLOUD_API_KEY}}"
-
-if [ -z "$LOGS_API_KEY" ]; then
-    echo -e "${RED}✗${NC} No API key found for logs"
-    echo "Please set GRAFANA_CLOUD_LOGS_API_KEY in config.env"
-    echo "or ensure GRAFANA_CLOUD_API_KEY has logs:write permission"
-    exit 1
-fi
-
 echo -e "${BLUE}1. LOADING CONFIGURATION${NC}"
 echo "────────────────────────────────"
 
@@ -40,6 +29,17 @@ if [ -f "$CONFIG_FILE" ]; then
     echo -e "${GREEN}✓${NC} Configuration loaded"
 else
     echo -e "${RED}✗${NC} Configuration file not found"
+    exit 1
+fi
+
+# The new logs API key - should be set in environment or passed as argument
+# If not provided, use the main API key (assuming it has logs:write permission)
+LOGS_API_KEY="${GRAFANA_CLOUD_LOGS_API_KEY:-${GRAFANA_CLOUD_API_KEY}}"
+
+if [ -z "$LOGS_API_KEY" ]; then
+    echo -e "${RED}✗${NC} No API key found for logs"
+    echo "Please set GRAFANA_CLOUD_LOGS_API_KEY in config.env"
+    echo "or ensure GRAFANA_CLOUD_API_KEY has logs:write permission"
     exit 1
 fi
 
