@@ -1,0 +1,110 @@
+# MINIMAL Grafana Agent config - ONLY Emby + Basic Server Metrics
+# This will reduce your metrics from ~12,000 to ~300 series (97% reduction!)
+
+server:
+  log_level: info
+
+metrics:
+  global:
+    scrape_interval: 60s
+    remote_write:
+      - url: https://prometheus-prod-36-prod-us-west-0.grafana.net/api/prom/push
+        basic_auth:
+          username: ${GRAFANA_CLOUD_USER}
+          password: ${GRAFANA_CLOUD_API_KEY}
+
+  configs:
+    - name: default
+      scrape_configs:
+        # Emby Live TV exporter - Keep all Emby metrics
+        - job_name: emby
+          static_configs:
+            - targets: ['localhost:9119']
+          scrape_interval: 60s  # 1 minute is fine
+          metrics_path: /metrics
+          
+        # Node exporter - ONLY ESSENTIAL METRICS
+        - job_name: node
+          static_configs:
+            - targets: ['localhost:9100']
+          scrape_interval: 60s
+          
+          # ONLY KEEP ESSENTIAL METRICS
+          metric_relabel_configs:
+            # KEEP ONLY THESE METRICS:
+            # CPU usage (single metric, not per-core)
+            - source_labels: [__name__]
+              regex: 'node_load1|node_load5|node_load15'
+              action: keep
+              
+            # Memory 
+            - source_labels: [__name__]
+              regex: 'node_memory_MemTotal_bytes|node_memory_MemFree_bytes|node_memory_MemAvailable_bytes|node_memory_Buffers_bytes|node_memory_Cached_bytes'
+              action: keep
+              
+            # Disk space (only root filesystem)
+            - source_labels: [__name__, mountpoint]
+              regex: 'node_filesystem_size_bytes;/$|node_filesystem_avail_bytes;/$|node_filesystem_free_bytes;/$'
+              action: keep
+              
+            # Uptime
+            - source_labels: [__name__]
+              regex: 'node_boot_time_seconds'
+              action: keep
+              
+            # Basic network (total, not per-interface)
+            - source_labels: [__name__]
+              regex: 'node_network_receive_bytes_total|node_network_transmit_bytes_total'
+              target_label: __tmp_keep
+              replacement: 'maybe'
+            - source_labels: [__name__, device, __tmp_keep]
+              regex: 'node_network.*;eth0;maybe|node_network.*;ens.*;maybe'
+              action: keep
+            - regex: __tmp_keep
+              action: labeldrop
+              
+            # DROP EVERYTHING ELSE
+            - source_labels: [__name__]
+              regex: 'node_.*'
+              action: drop
+
+# NO INTEGRATIONS - This saves 426 series
+integrations:
+  agent:
+    enabled: false
+    
+logs:
+  configs:
+    - name: default
+      clients:
+        - url: https://logs-prod-021.grafana.net/loki/api/v1/push
+          basic_auth:
+            username: 1299471
+            password: ${GRAFANA_CLOUD_LOGS_API_KEY}
+            
+      positions:
+        filename: /var/lib/grafana-agent/positions.yaml
+        
+      scrape_configs:
+        # Emby Server Logs
+        - job_name: embyserver
+          static_configs:
+            - targets:
+                - localhost
+              labels:
+                job: embyserver
+                __path__: /var/lib/emby/logs/embyserver.txt
+                
+          pipeline_stages:
+            - multiline:
+                firstline: '^\d{4}-\d{2}-\d{2}'
+                max_wait_time: 3s
+                
+        # NFL Updater Logs  
+        - job_name: nfl_updater
+          static_configs:
+            - targets:
+                - localhost
+              labels:
+                job: nfl_updater
+                __path__: /var/log/nfl_updater.log
