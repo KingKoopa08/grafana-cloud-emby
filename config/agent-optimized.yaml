@@ -1,0 +1,152 @@
+# Optimized Grafana Agent config to reduce metrics costs
+# This configuration reduces cardinality and scrape frequency
+
+server:
+  log_level: info
+
+metrics:
+  global:
+    scrape_interval: 120s  # Increased from 60s default
+    remote_write:
+      - url: https://prometheus-prod-36-prod-us-west-0.grafana.net/api/prom/push
+        basic_auth:
+          username: ${GRAFANA_CLOUD_USER}
+          password: ${GRAFANA_CLOUD_API_KEY}
+        
+        # Reduce samples sent
+        queue_config:
+          capacity: 10000
+          max_samples_per_send: 5000
+          batch_send_deadline: 30s
+
+  configs:
+    - name: default
+      scrape_configs:
+        # Emby Live TV exporter - OPTIMIZED
+        - job_name: emby
+          static_configs:
+            - targets: ['localhost:9119']
+          scrape_interval: 300s  # 5 minutes instead of 30s - Live TV doesn't change that fast
+          scrape_timeout: 30s
+          metrics_path: /metrics
+          
+          # DROP HIGH-CARDINALITY METRICS
+          metric_relabel_configs:
+            # Drop per-channel metrics (61 channels = 61x cardinality!)
+            - source_labels: [__name__]
+              regex: 'emby_livetv_channel_info'
+              action: drop
+              
+            # Drop per-program metrics (hundreds of programs)
+            - source_labels: [__name__]
+              regex: 'emby_livetv_program_.*'
+              action: drop
+              
+            # Drop per-timer metrics
+            - source_labels: [__name__]
+              regex: 'emby_livetv_timer_.*'
+              action: drop
+              
+            # Drop per-recording details
+            - source_labels: [__name__]
+              regex: 'emby_livetv_recording_(path|size|duration).*'
+              action: drop
+              
+            # Drop device-specific metrics
+            - source_labels: [__name__]
+              regex: 'emby_livetv_device_.*'
+              action: drop
+              
+            # KEEP only aggregate metrics
+            # Keep: emby_livetv_streams_active
+            # Keep: emby_livetv_channels_total
+            # Keep: emby_livetv_recordings_total
+            # Keep: emby_livetv_tuners_total
+            # Keep: emby_livetv_guide_days
+            # Keep: emby_server_info
+            
+        # Node exporter - OPTIMIZED
+        - job_name: node
+          static_configs:
+            - targets: ['localhost:9100']
+          scrape_interval: 300s  # 5 minutes is enough for system metrics
+          
+          # DROP DETAILED SYSTEM METRICS
+          metric_relabel_configs:
+            # Drop per-CPU metrics (keep only aggregate)
+            - source_labels: [__name__, cpu]
+              regex: 'node_cpu_seconds_total;[0-9]+'
+              action: drop
+              
+            # Drop per-filesystem metrics except main ones
+            - source_labels: [__name__, mountpoint]
+              regex: 'node_filesystem.*;(/dev|/sys|/proc|/run|/var/lib/docker).*'
+              action: drop
+              
+            # Drop detailed network metrics
+            - source_labels: [__name__]
+              regex: 'node_network_.*'
+              action: drop
+              
+            # Drop detailed disk metrics
+            - source_labels: [__name__]
+              regex: 'node_disk_io_.*'
+              action: drop
+              
+            # Keep only essential metrics
+            # Keep: node_load1, node_load5, node_load15
+            # Keep: node_memory_MemAvailable_bytes
+            # Keep: node_filesystem_avail_bytes{mountpoint="/"}
+            # Keep: node_uname_info
+
+integrations:
+  agent:
+    enabled: true
+    # Reduce agent's own metrics
+    scrape_interval: 300s
+    
+logs:
+  configs:
+    - name: default
+      clients:
+        - url: https://logs-prod-021.grafana.net/loki/api/v1/push
+          basic_auth:
+            username: 1299471  # Logs user ID
+            password: ${GRAFANA_CLOUD_LOGS_API_KEY}
+          
+          # Batch logs to reduce API calls
+          batch_wait: 5s
+          batch_size: 1048576  # 1MB batches
+            
+      positions:
+        filename: /var/lib/grafana-agent/positions.yaml
+        
+      scrape_configs:
+        # Emby Server Logs
+        - job_name: embyserver
+          static_configs:
+            - targets:
+                - localhost
+              labels:
+                job: embyserver
+                __path__: /var/lib/emby/logs/embyserver.txt
+                
+          pipeline_stages:
+            # Add sampling to reduce log volume
+            - sampling:
+                rate: 0.5  # Keep only 50% of logs
+                
+            - multiline:
+                firstline: '^\d{4}-\d{2}-\d{2}'
+                max_wait_time: 3s
+                
+        # NFL Updater Logs  
+        - job_name: nfl_updater
+          static_configs:
+            - targets:
+                - localhost
+              labels:
+                job: nfl_updater
+                __path__: /var/log/nfl_updater.log
+                
+          # No sampling for NFL - it's low volume
