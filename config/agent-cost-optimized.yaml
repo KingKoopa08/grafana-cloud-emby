@@ -1,0 +1,277 @@
+server:
+  log_level: info
+  http_listen_port: 12345
+
+metrics:
+  global:
+    scrape_interval: 30s
+    external_labels:
+      cluster: 'emby-server'
+      instance: 'emby-primary'
+  
+  configs:
+    - name: integrations
+      remote_write:
+        - url: https://prometheus-prod-36-prod-us-west-0.grafana.net/api/prom/push
+          basic_auth:
+            username: '2607589'
+            password: ${GRAFANA_CLOUD_API_KEY}
+          # Drop internal metrics before sending to Grafana Cloud
+          write_relabel_configs:
+            # Drop ALL Grafana Cloud internal metrics
+            - source_labels: [__name__]
+              regex: 'grafanacloud_.*'
+              action: drop
+            - source_labels: [__name__]
+              regex: 'usage_cloud_.*'
+              action: drop
+            - source_labels: [__name__]
+              regex: 'billing_.*'
+              action: drop
+            - source_labels: [__name__]
+              regex: 'cortex_.*'
+              action: drop
+            
+            # Drop ALL Loki internal metrics
+            - source_labels: [__name__]
+              regex: 'loki_.*'
+              action: drop
+            - source_labels: [__name__]
+              regex: 'promtail_.*'
+              action: drop
+            
+            # Drop ALL Prometheus internal metrics
+            - source_labels: [__name__]
+              regex: 'prometheus_.*'
+              action: drop
+            - source_labels: [__name__]
+              regex: 'go_.*'
+              action: drop
+            - source_labels: [__name__]
+              regex: 'process_.*'
+              action: drop
+            
+            # Drop Grafana Agent internal metrics
+            - source_labels: [__name__]
+              regex: 'agent_.*'
+              action: drop
+            - source_labels: [__name__]
+              regex: 'grafana_agent_.*'
+              action: drop
+            
+            # Drop excessive node_exporter metrics - keep only essentials
+            # Drop per-CPU metrics (keep only aggregate)
+            - source_labels: [__name__, cpu]
+              regex: 'node_cpu_seconds_total;[0-9]+'
+              action: drop
+            
+            # Drop all filesystem metrics except root and data partitions
+            - source_labels: [__name__, mountpoint]
+              regex: 'node_filesystem.*;(/dev|/proc|/sys|/run|/var/lib/docker|/var/lib/kubelet|/snap|/boot/efi|/tmp).*'
+              action: drop
+            
+            # Drop all network metrics except main interface
+            - source_labels: [__name__, device]
+              regex: 'node_network.*;(lo|docker[0-9]+|veth.*|br-.*)'
+              action: drop
+            
+            # Drop detailed memory metrics, keep only main ones
+            - source_labels: [__name__]
+              regex: 'node_memory_(Inactive|Active|Buffers|Cached|SwapCached|Dirty|Writeback|AnonPages|Mapped|Shmem|Slab|SReclaimable|SUnreclaim|KernelStack|PageTables|NFS_Unstable|Bounce|WritebackTmp|CommitLimit|Committed_AS|VmallocTotal|VmallocUsed|VmallocChunk|HardwareCorrupted|AnonHugePages|CmaTotal|CmaFree|HugePages_Total|HugePages_Free|HugePages_Rsvd|HugePages_Surp|Hugepagesize|DirectMap4k|DirectMap2M|DirectMap1G).*'
+              action: drop
+            
+            # Drop detailed disk metrics
+            - source_labels: [__name__]
+              regex: 'node_disk_(io_time_seconds_total|io_time_weighted_seconds_total|read_time_seconds_total|write_time_seconds_total|reads_merged_total|writes_merged_total|discards_completed_total|discards_merged_total|flush_requests_total|io_now)'
+              action: drop
+      
+      scrape_configs:
+        # Emby Exporter metrics - KEEP ALL
+        - job_name: 'emby-exporter'
+          static_configs:
+            - targets: ['localhost:9119']
+              labels:
+                service: 'emby'
+                environment: 'production'
+        
+        # Node Exporter - with heavy filtering
+        - job_name: 'node'
+          static_configs:
+            - targets: ['localhost:9100']
+              labels:
+                host: 'emby-server'
+          metric_relabel_configs:
+            # Keep only essential node metrics
+            - source_labels: [__name__]
+              regex: 'node_(cpu_seconds_total|load1|load5|load15|memory_MemTotal_bytes|memory_MemFree_bytes|memory_MemAvailable_bytes|filesystem_size_bytes|filesystem_free_bytes|filesystem_avail_bytes|network_receive_bytes_total|network_transmit_bytes_total|disk_read_bytes_total|disk_written_bytes_total|up)'
+              action: keep
+            
+            # For the metrics we keep, filter out unwanted labels
+            # Keep only aggregate CPU (no per-core)
+            - source_labels: [__name__, mode]
+              regex: 'node_cpu_seconds_total;(idle|system|user|iowait)'
+              action: keep
+            
+            # Keep only root and main data filesystems
+            - source_labels: [__name__, mountpoint]
+              regex: 'node_filesystem.*;(/|/home|/var|/opt|/mnt/data)$'
+              action: keep
+            
+            # Keep only main network interfaces
+            - source_labels: [__name__, device]
+              regex: 'node_network.*;(eth[0-9]+|ens[0-9]+|enp[0-9]+s[0-9]+)'
+              action: keep
+        
+        # DO NOT scrape Grafana Agent's own metrics
+
+# Completely disable agent self-monitoring
+integrations:
+  agent:
+    enabled: false  # Disable agent self-monitoring completely
+  
+  node_exporter:
+    enabled: true
+    include_exporter_metrics: false  # Don't include node_exporter's own metrics
+    disable_collectors:
+      - "mdadm"
+      - "bcache"
+      - "bonding"
+      - "btrfs"
+      - "conntrack"
+      - "cpufreq"
+      - "edac"
+      - "entropy"
+      - "filefd"
+      - "hwmon"
+      - "infiniband"
+      - "ipvs"
+      - "nfs"
+      - "nfsd"
+      - "powersupplyclass"
+      - "pressure"
+      - "rapl"
+      - "schedstat"
+      - "sockstat"
+      - "softnet"
+      - "stat"
+      - "textfile"
+      - "thermal_zone"
+      - "time"
+      - "timex"
+      - "udp_queues"
+      - "vmstat"
+      - "xfs"
+      - "zfs"
+    
+    filesystem_mount_points_exclude: |
+      ^/(dev|proc|sys|run|var/lib/docker|var/lib/kubelet|snap|boot/efi|tmp)($|/)
+    
+    filesystem_fs_types_exclude: |
+      ^(autofs|binfmt_misc|bpf|cgroup2?|configfs|debugfs|devpts|devtmpfs|tmpfs|fusectl|hugetlbfs|iso9660|mqueue|nsfs|overlay|proc|procfs|pstore|rpc_pipefs|securityfs|selinuxfs|squashfs|sysfs|tracefs)$
+  
+  # Additional write relabel configs for the integration
+  prometheus_remote_write:
+    - url: https://prometheus-prod-36-prod-us-west-0.grafana.net/api/prom/push
+      basic_auth:
+        username: '2607589'
+        password: ${GRAFANA_CLOUD_API_KEY}
+      # Apply same filtering here
+      write_relabel_configs:
+        # Drop all internal metrics
+        - source_labels: [__name__]
+          regex: '(grafanacloud_|usage_cloud_|billing_|cortex_|loki_|promtail_|prometheus_|go_|process_|agent_|grafana_agent_).*'
+          action: drop
+
+logs:
+  configs:
+    - name: default
+      clients:
+        - url: https://logs-prod-012.grafana.net/loki/api/v1/push
+          basic_auth:
+            username: '2607589'
+            password: ${GRAFANA_CLOUD_API_KEY}
+          external_labels:
+            cluster: 'emby-server'
+            job: 'varlogs'
+      
+      positions:
+        filename: /tmp/positions.yaml
+      
+      scrape_configs:
+        # Emby Server logs - KEEP
+        - job_name: emby
+          static_configs:
+            - targets:
+                - localhost
+              labels:
+                job: emby
+                __path__: /var/lib/emby/logs/*.txt
+          
+          pipeline_stages:
+            - regex:
+                expression: '^(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d+) \[(?P<level>\w+)\] (?P<logger>[^:]+): (?P<message>.*)'
+            
+            - labels:
+                level:
+                logger:
+            
+            - timestamp:
+                source: timestamp
+                format: '2006-01-02 15:04:05.000'
+        
+        # System logs - KEEP but filtered
+        - job_name: system
+          journal:
+            labels:
+              job: systemd-journal
+            path: /var/log/journal
+          
+          relabel_configs:
+            - source_labels: ['__journal__systemd_unit']
+              target_label: 'unit'
+            - source_labels: ['__journal__hostname']
+              target_label: 'hostname'
+            - source_labels: ['__journal_priority_keyword']
+              target_label: 'level'
+        
+        # Nginx logs - KEEP if present
+        - job_name: nginx
+          static_configs:
+            - targets:
+                - localhost
+              labels:
+                job: nginx
+                __path__: /var/log/nginx/*.log
+          
+          pipeline_stages:
+            - regex:
+                expression: '^(?P<remote_addr>[\w\.]+) - (?P<remote_user>[^ ]*) \[(?P<time_local>[^\]]*)\] "(?P<method>\w+) (?P<path>[^ ]*) (?P<protocol>[^ ]*)" (?P<status>\d+) (?P<body_bytes_sent>\d+) "(?P<http_referer>[^"]*)" "(?P<http_user_agent>[^"]*)"'
+            
+            - labels:
+                method:
+                status:
+            
+            # DO NOT generate metrics from logs - this creates unnecessary series
+            # Removed metrics stage
+
+# Traces - optional, can be disabled if not used
+traces:
+  configs:
+    - name: default
+      remote_write:
+        - endpoint: tempo-prod-10-prod-us-west-0.grafana.net:443
+          basic_auth:
+            username: '2607589'
+            password: ${GRAFANA_CLOUD_API_KEY}
+      
+      receivers:
+        otlp:
+          protocols:
+            grpc:
+              endpoint: 0.0.0.0:4317
+            http:
+              endpoint: 0.0.0.0:4318
+      
+      batch:
+        timeout: 5s
+        send_batch_size: 100
