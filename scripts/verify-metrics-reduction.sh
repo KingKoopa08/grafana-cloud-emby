@@ -62,10 +62,12 @@ echo "----------------------------------------"
 
 # Emby metrics
 EMBY_COUNT=$(curl -s http://localhost:12345/metrics 2>/dev/null | grep -c "^emby_" || echo "0")
+EMBY_COUNT=$(echo "$EMBY_COUNT" | tr -d '\n' | head -1)
 echo -e "Emby metrics:                ${GREEN}$EMBY_COUNT${NC}"
 
 # Node metrics
 NODE_COUNT=$(curl -s http://localhost:12345/metrics 2>/dev/null | grep -c "^node_" || echo "0")
+NODE_COUNT=$(echo "$NODE_COUNT" | tr -d '\n' | head -1)
 echo -e "Node metrics:                ${GREEN}$NODE_COUNT${NC}"
 
 # Check for unwanted metrics that should be filtered
