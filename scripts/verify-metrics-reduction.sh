@@ -77,6 +77,7 @@ echo "----------------------------------------"
 
 # Grafana Cloud internal
 GRAFANA_COUNT=$(curl -s http://localhost:12345/metrics 2>/dev/null | grep -c "^grafanacloud_\|^usage_cloud_\|^billing_" || echo "0")
+GRAFANA_COUNT=$(echo "$GRAFANA_COUNT" | tr -d '\n' | head -1)
 if [ "$GRAFANA_COUNT" -eq 0 ]; then
     echo -e "Grafana Cloud internal:      ${GREEN}$GRAFANA_COUNT ✓${NC}"
 else
@@ -85,6 +86,7 @@ fi
 
 # Loki internal
 LOKI_COUNT=$(curl -s http://localhost:12345/metrics 2>/dev/null | grep -c "^loki_\|^promtail_" || echo "0")
+LOKI_COUNT=$(echo "$LOKI_COUNT" | tr -d '\n' | head -1)
 if [ "$LOKI_COUNT" -eq 0 ]; then
     echo -e "Loki internal:               ${GREEN}$LOKI_COUNT ✓${NC}"
 else
@@ -93,6 +95,7 @@ fi
 
 # Prometheus internal
 PROM_COUNT=$(curl -s http://localhost:12345/metrics 2>/dev/null | grep -c "^prometheus_" || echo "0")
+PROM_COUNT=$(echo "$PROM_COUNT" | tr -d '\n' | head -1)
 if [ "$PROM_COUNT" -eq 0 ]; then
     echo -e "Prometheus internal:         ${GREEN}$PROM_COUNT ✓${NC}"
 else
@@ -101,6 +104,7 @@ fi
 
 # Go runtime
 GO_COUNT=$(curl -s http://localhost:12345/metrics 2>/dev/null | grep -c "^go_" || echo "0")
+GO_COUNT=$(echo "$GO_COUNT" | tr -d '\n' | head -1)
 if [ "$GO_COUNT" -eq 0 ]; then
     echo -e "Go runtime:                  ${GREEN}$GO_COUNT ✓${NC}"
 else
@@ -109,6 +113,7 @@ fi
 
 # Process metrics
 PROCESS_COUNT=$(curl -s http://localhost:12345/metrics 2>/dev/null | grep -c "^process_" || echo "0")
+PROCESS_COUNT=$(echo "$PROCESS_COUNT" | tr -d '\n' | head -1)
 if [ "$PROCESS_COUNT" -eq 0 ]; then
     echo -e "Process metrics:             ${GREEN}$PROCESS_COUNT ✓${NC}"
 else
@@ -117,6 +122,7 @@ fi
 
 # Agent metrics
 AGENT_COUNT=$(curl -s http://localhost:12345/metrics 2>/dev/null | grep -c "^agent_\|^grafana_agent_" || echo "0")
+AGENT_COUNT=$(echo "$AGENT_COUNT" | tr -d '\n' | head -1)
 if [ "$AGENT_COUNT" -eq 0 ]; then
     echo -e "Agent self-monitoring:       ${GREEN}$AGENT_COUNT ✓${NC}"
 else
@@ -126,6 +132,7 @@ fi
 # Total metrics
 echo ""
 TOTAL_COUNT=$(curl -s http://localhost:12345/metrics 2>/dev/null | grep -c "^[a-z]" || echo "0")
+TOTAL_COUNT=$(echo "$TOTAL_COUNT" | tr -d '\n' | head -1)
 echo -e "${CYAN}Total metric lines:${NC} ${GREEN}$TOTAL_COUNT${NC}"
 
 # Check node metrics detail
@@ -133,14 +140,19 @@ echo ""
 echo -e "${CYAN}Node metrics breakdown:${NC}"
 echo "----------------------------------------"
 CPU_COUNT=$(curl -s http://localhost:12345/metrics 2>/dev/null | grep -c "^node_cpu_" || echo "0")
+CPU_COUNT=$(echo "$CPU_COUNT" | tr -d '\n' | head -1)
 echo "CPU metrics:           $CPU_COUNT"
 MEM_COUNT=$(curl -s http://localhost:12345/metrics 2>/dev/null | grep -c "^node_memory_" || echo "0")
+MEM_COUNT=$(echo "$MEM_COUNT" | tr -d '\n' | head -1)
 echo "Memory metrics:        $MEM_COUNT"
 DISK_COUNT=$(curl -s http://localhost:12345/metrics 2>/dev/null | grep -c "^node_disk_" || echo "0")
+DISK_COUNT=$(echo "$DISK_COUNT" | tr -d '\n' | head -1)
 echo "Disk metrics:          $DISK_COUNT"
 FS_COUNT=$(curl -s http://localhost:12345/metrics 2>/dev/null | grep -c "^node_filesystem_" || echo "0")
+FS_COUNT=$(echo "$FS_COUNT" | tr -d '\n' | head -1)
 echo "Filesystem metrics:    $FS_COUNT"
 NET_COUNT=$(curl -s http://localhost:12345/metrics 2>/dev/null | grep -c "^node_network_" || echo "0")
+NET_COUNT=$(echo "$NET_COUNT" | tr -d '\n' | head -1)
 echo "Network metrics:       $NET_COUNT"
 
 # Sample some actual metrics
